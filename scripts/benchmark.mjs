@@ -27,6 +27,26 @@ import { createSpamFilter } from "@textfilters/spam";
 
 const ITERATIONS = 1_000;
 const SETUP_ITERATIONS = 100;
+const SUITES = ["core", "url", "email", "phone", "profanity", "spam", "combined"];
+const requestedSuites = new Set(process.argv.slice(2));
+
+if (requestedSuites.has("--help") || requestedSuites.has("-h")) {
+  console.log("Usage: npm run benchmark -- [suite...]");
+  console.log(`Suites: ${SUITES.join(", ")}`);
+  process.exit(0);
+}
+
+for (const suite of requestedSuites) {
+  if (!SUITES.includes(suite)) {
+    console.error(`Unknown benchmark suite: ${suite}`);
+    console.error(`Available suites: ${SUITES.join(", ")}`);
+    process.exit(1);
+  }
+}
+
+function shouldRunSuite(suite) {
+  return requestedSuites.size === 0 || requestedSuites.has(suite);
+}
 
 function bench(label, fn, iterations = ITERATIONS) {
   for (let i = 0; i < Math.min(100, iterations); i++) fn();
@@ -52,6 +72,19 @@ function printResults(suiteName, results) {
       `${r.label.padEnd(52)} ${String(r.iterations).padStart(7)} ${r.totalMs.toFixed(2).padStart(10)} ${r.avgMs.toFixed(4).padStart(10)} ${String(r.opsPerSec).padStart(10)}`,
     );
   }
+}
+
+function runSuite(suite, suiteName, createResults) {
+  if (!shouldRunSuite(suite)) return;
+  printResults(suiteName, createResults());
+}
+
+function createCombinedPipeline(compiledDictionary) {
+  return createTextPipeline()
+    .use(createUrlFilter())
+    .use(createEmailFilter())
+    .use(createPhoneFilter())
+    .use(createProfanityFilterFromCompiledDictionary(compiledDictionary));
 }
 
 // ---------------------------------------------------------------------------
@@ -86,14 +119,22 @@ const LONG_PROFANE_MATCH_LATE =
 // core pipeline
 // ---------------------------------------------------------------------------
 
-{
+runSuite("core", "core · pipeline", () => {
   const urlFilter = createUrlFilter();
   const emailFilter = createEmailFilter();
 
   const single = createTextPipeline().use(urlFilter);
   const multi = createTextPipeline().use(urlFilter).use(emailFilter);
 
-  const results = [
+  return [
+    bench("pipeline · create single-filter pipeline", () =>
+      createTextPipeline().use(urlFilter),
+      SETUP_ITERATIONS,
+    ),
+    bench("pipeline · create multi-filter pipeline", () =>
+      createTextPipeline().use(urlFilter).use(emailFilter),
+      SETUP_ITERATIONS,
+    ),
     bench("pipeline single filter · short clean", () => single.censor(SHORT_CLEAN)),
     bench("pipeline single filter · long clean", () => single.censor(LONG_CLEAN)),
     bench("pipeline single filter · short url match", () => single.censor(SHORT_URL)),
@@ -107,19 +148,17 @@ const LONG_PROFANE_MATCH_LATE =
       multi.censor(LONG_URL_LATE),
     ),
   ];
-
-  printResults("core · pipeline", results);
-}
+});
 
 // ---------------------------------------------------------------------------
 // url
 // ---------------------------------------------------------------------------
 
-{
+runSuite("url", "url", () => {
   const f = createUrlFilter();
   const fCustomMask = createUrlFilter({ maskChar: "█" });
 
-  const results = [
+  return [
     bench("url · createUrlFilter()", () => createUrlFilter(), SETUP_ITERATIONS),
     bench("url · censor · short clean", () => f.censor(SHORT_CLEAN)),
     bench("url · censor · long clean", () => f.censor(LONG_CLEAN)),
@@ -129,19 +168,17 @@ const LONG_PROFANE_MATCH_LATE =
       fCustomMask.censor(SHORT_URL),
     ),
   ];
-
-  printResults("url", results);
-}
+});
 
 // ---------------------------------------------------------------------------
 // email
 // ---------------------------------------------------------------------------
 
-{
+runSuite("email", "email", () => {
   const f = createEmailFilter();
   const fCustomMask = createEmailFilter({ maskChar: "▪" });
 
-  const results = [
+  return [
     bench("email · createEmailFilter()", () => createEmailFilter(), SETUP_ITERATIONS),
     bench("email · censor · short clean", () => f.censor(SHORT_CLEAN)),
     bench("email · censor · long clean", () => f.censor(LONG_CLEAN)),
@@ -151,19 +188,17 @@ const LONG_PROFANE_MATCH_LATE =
       fCustomMask.censor(SHORT_EMAIL),
     ),
   ];
-
-  printResults("email", results);
-}
+});
 
 // ---------------------------------------------------------------------------
 // phone
 // ---------------------------------------------------------------------------
 
-{
+runSuite("phone", "phone", () => {
   const f = createPhoneFilter();
   const fCustomMask = createPhoneFilter({ maskChar: "•" });
 
-  const results = [
+  return [
     bench("phone · createPhoneFilter()", () => createPhoneFilter(), SETUP_ITERATIONS),
     bench("phone · censor · short clean", () => f.censor(SHORT_CLEAN)),
     bench("phone · censor · long clean", () => f.censor(LONG_CLEAN)),
@@ -173,20 +208,18 @@ const LONG_PROFANE_MATCH_LATE =
       fCustomMask.censor(SHORT_PHONE),
     ),
   ];
-
-  printResults("phone", results);
-}
+});
 
 // ---------------------------------------------------------------------------
 // profanity
 // ---------------------------------------------------------------------------
 
-{
+runSuite("profanity", "profanity", () => {
   const compiled = compileProfanityDictionary(russianProfanityDictionary);
   const f = createProfanityFilterFromDictionary(russianProfanityDictionary);
   const fCompiled = createProfanityFilterFromCompiledDictionary(compiled);
 
-  const results = [
+  return [
     bench("profanity · compileProfanityDictionary()", () =>
       compileProfanityDictionary(russianProfanityDictionary),
       SETUP_ITERATIONS,
@@ -218,21 +251,17 @@ const LONG_PROFANE_MATCH_LATE =
       fCompiled.censor(SHORT_PROFANE_MATCH),
     ),
   ];
-
-  printResults("profanity", results);
-}
+});
 
 // ---------------------------------------------------------------------------
 // spam: every case creates its own guard and uses explicit nowMs values
 // ---------------------------------------------------------------------------
 
-{
-  const f = createSpamFilter();
-
+runSuite("spam", "spam", () => {
   let t = 1_000_000;
   const nextT = (gap = 2000) => (t += gap);
 
-  const results = [
+  return [
     bench("spam · createSpamFilter()", () => createSpamFilter(), SETUP_ITERATIONS),
     bench(
       "spam · check · allowed · short",
@@ -292,22 +321,31 @@ const LONG_PROFANE_MATCH_LATE =
       },
       500,
     ),
+    bench(
+      "spam · check · many actors · maxActors pruning",
+      () => {
+        const sf = createSpamFilter({
+          maxActors: 10,
+          minIntervalMs: 0,
+          burstMaxMessages: 100,
+        });
+        const base = nextT(10_000);
+        for (let i = 0; i < 50; i++) {
+          sf.check({ actorKey: `u${i}`, text: `msg ${i}`, nowMs: base + i });
+        }
+      },
+      500,
+    ),
   ];
-
-  printResults("spam", results);
-}
+});
 
 // ---------------------------------------------------------------------------
 // combined pipeline: url + email + phone + profanity
 // ---------------------------------------------------------------------------
 
-{
+runSuite("combined", "pipeline · url + email + phone + profanity", () => {
   const compiled = compileProfanityDictionary(russianProfanityDictionary);
-  const pipeline = createTextPipeline()
-    .use(createUrlFilter())
-    .use(createEmailFilter())
-    .use(createPhoneFilter())
-    .use(createProfanityFilterFromCompiledDictionary(compiled));
+  const pipeline = createCombinedPipeline(compiled);
 
   const COMBINED_CLEAN = "Привет, как дела? Всё хорошо.";
   const COMBINED_MATCH =
@@ -316,7 +354,11 @@ const LONG_PROFANE_MATCH_LATE =
     "Обычный текст без нарушений. ".repeat(50) +
     "Пиши на evil@spam.ru или https://spam.ru тел +7 (999) 000-00-00 блять";
 
-  const results = [
+  return [
+    bench("combined pipeline · create composed pipeline", () =>
+      createCombinedPipeline(compiled),
+      SETUP_ITERATIONS,
+    ),
     bench("combined pipeline · short clean", () => pipeline.censor(COMBINED_CLEAN)),
     bench("combined pipeline · long clean", () => pipeline.censor(LONG_CLEAN)),
     bench("combined pipeline · short all-match", () =>
@@ -326,8 +368,6 @@ const LONG_PROFANE_MATCH_LATE =
       pipeline.censor(COMBINED_LONG_LATE),
     ),
   ];
-
-  printResults("pipeline · url + email + phone + profanity", results);
-}
+});
 
 console.log("\n✓ benchmark complete\n");

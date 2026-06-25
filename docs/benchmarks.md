@@ -23,6 +23,28 @@ npm run benchmark
 No build step is required. The runner uses Node.js built-in modules and public
 package exports only.
 
+## Running a Subset
+
+Pass one or more suite names after `--` to run only part of the benchmark set:
+
+```sh
+npm run benchmark -- profanity
+npm run benchmark -- url email phone
+npm run benchmark -- spam combined
+```
+
+Supported suite names are:
+
+- `core`
+- `url`
+- `email`
+- `phone`
+- `profanity`
+- `spam`
+- `combined`
+
+Use `npm run benchmark -- --help` to print the suite list in the terminal.
+
 ## Output Format
 
 Each row contains four measurements:
@@ -40,6 +62,8 @@ Each row contains four measurements:
 
 | Case | Measures |
 |---|---|
+| create single-filter pipeline | Setup cost for a one-filter pipeline |
+| create multi-filter pipeline | Setup cost for a chained pipeline |
 | single filter · short/long clean | `censor()` overhead with no match |
 | single filter · short/long match | URL detection and masking cost |
 | multi filter · short/long | Chained censor overhead |
@@ -79,12 +103,14 @@ uses explicit `nowMs` values instead of wall-clock time.
 | check · tooFast block | Early exit on interval violation |
 | check · duplicate block | Duplicate detection within the duplicate window |
 | check · burst block | Burst threshold rejection |
-| many messages · same actor | Actor state growth and pruning pressure |
+| many messages · same actor | Repeated checks and state growth for one actor |
+| many actors · maxActors pruning | Actor-map pruning under churn |
 
 ### Combined Pipeline
 
 `url + email + phone + profanity` in one `TextPipeline`:
 
+- composed pipeline setup
 - short clean text
 - long clean text
 - short text with all match types
