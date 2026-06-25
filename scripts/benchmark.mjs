@@ -81,8 +81,8 @@ function runSuite(suite, suiteName, createResults) {
 
 function createCombinedPipeline(compiledDictionary) {
   return createTextPipeline()
-    .use(createUrlFilter())
     .use(createEmailFilter())
+    .use(createUrlFilter())
     .use(createPhoneFilter())
     .use(createProfanityFilterFromCompiledDictionary(compiledDictionary));
 }
@@ -124,7 +124,7 @@ runSuite("core", "core · pipeline", () => {
   const emailFilter = createEmailFilter();
 
   const single = createTextPipeline().use(urlFilter);
-  const multi = createTextPipeline().use(urlFilter).use(emailFilter);
+  const multi = createTextPipeline().use(emailFilter).use(urlFilter);
 
   return [
     bench("pipeline · create single-filter pipeline", () =>
@@ -260,15 +260,19 @@ runSuite("profanity", "profanity", () => {
 runSuite("spam", "spam", () => {
   let t = 1_000_000;
   const nextT = (gap = 2000) => (t += gap);
+  const allowedFilter = createSpamFilter({ minIntervalMs: 0 });
+  let allowedMessageId = 0;
 
   return [
     bench("spam · createSpamFilter()", () => createSpamFilter(), SETUP_ITERATIONS),
     bench(
       "spam · check · allowed · short",
-      () => {
-        const sf = createSpamFilter();
-        return sf.check({ actorKey: "u1", text: SHORT_CLEAN, nowMs: nextT() });
-      },
+      () =>
+        allowedFilter.check({
+          actorKey: "u1",
+          text: `allowed ${allowedMessageId++}`,
+          nowMs: nextT(),
+        }),
       1_000,
     ),
     bench(
@@ -312,8 +316,9 @@ runSuite("spam", "spam", () => {
       () => {
         const sf = createSpamFilter({
           minIntervalMs: 0,
+          duplicateWindowMs: 1_000,
           burstMaxMessages: 100,
-          burstWindowMs: 10_000,
+          burstWindowMs: 1_000,
         });
         for (let i = 0; i < 50; i++) {
           sf.check({ actorKey: "u1", text: `msg ${i}`, nowMs: nextT(100) });
